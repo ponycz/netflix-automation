@@ -1,5 +1,6 @@
 const express = require('express');
-const puppeteer = require('puppeteer');
+const puppeteer = require('puppeteer-core');
+const chromium = require('@sparticuz/chromium');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -41,19 +42,13 @@ app.post('/netflix-confirm', async (req, res) => {
 
   let browser;
   try {
-    // Spuštění prohlížeče
+    // Spuštění prohlížeče s optimalizovaným Chromiem
     console.log('🚀 Spouštím Puppeteer...');
     browser = await puppeteer.launch({
-      headless: 'new',
-      args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-accelerated-2d-canvas',
-        '--no-first-run',
-        '--no-zygote',
-        '--disable-gpu'
-      ]
+      args: chromium.args,
+      defaultViewport: chromium.defaultViewport,
+      executablePath: await chromium.executablePath(),
+      headless: chromium.headless,
     });
 
     const page = await browser.newPage();
@@ -125,8 +120,7 @@ app.post('/netflix-confirm', async (req, res) => {
     }
 
     // Screenshot před kliknutím (pro debugging)
-    const screenshotBefore = await page.screenshot({ encoding: 'base64' });
-    console.log('📸 Screenshot před kliknutím pořízen');
+    console.log('📸 Pořizuji screenshot před kliknutím...');
 
     // Kliknutí na tlačítko
     console.log('👆 Klikám na tlačítko...');
@@ -150,10 +144,6 @@ app.post('/netflix-confirm', async (req, res) => {
     // Počkáme na reakci stránky
     console.log('⏳ Čekám na dokončení...');
     await new Promise(resolve => setTimeout(resolve, 3000));
-
-    // Screenshot po kliknutí
-    const screenshotAfter = await page.screenshot({ encoding: 'base64' });
-    console.log('📸 Screenshot po kliknutí pořízen');
 
     // Získání finální URL (pro ověření)
     const finalUrl = page.url();
