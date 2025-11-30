@@ -112,7 +112,7 @@ app.post('/netflix-confirm', async (req, res) => {
     // Otevření stránky s realistickým chováním
     await page.goto(url, {
       waitUntil: 'networkidle0', // Počkat až se všechno načte
-      timeout: 60000
+      timeout: 15000
     });
     
     // Počkat chvíli jako by uživatel četl stránku
