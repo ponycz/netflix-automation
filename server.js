@@ -88,7 +88,7 @@ app.post('/netflix-confirm', async (req, res) => {
 
     // PARALELNÍ testování - všechny selektory najednou!
     const possibleSelectors = [
-      'button[type="button"]', // Nejčastější - dát jako první
+      'button[type="button"]', // Nejčastější - Netflix confirmation button
       'button[type="submit"]',
       'button[data-uia="set-primary-location-action"]',
       'button[data-uia="confirmation-button"]',
@@ -106,23 +106,26 @@ app.post('/netflix-confirm', async (req, res) => {
 
     try {
       // Vytvoříme Promise pro každý selektor
+      // Každý Promise buď uspěje (vrátí selektor) nebo selže (reject)
       const selectorPromises = possibleSelectors.map(selector => 
-        page.waitForSelector(selector, { timeout: 5000 })
-          .then(() => selector) // Vrátíme název selectoru pokud najde
-          .catch(() => null) // Null pokud nenajde
+        page.waitForSelector(selector, { timeout: 8000 })
+          .then(() => ({ success: true, selector }))
+          .catch(() => ({ success: false, selector }))
       );
 
-      // Čekáme na PRVNÍ úspěšný (Promise.race)
-      usedSelector = await Promise.race(
-        selectorPromises.filter(p => p !== null)
-      );
-
-      if (usedSelector) {
+      // Čekáme až všechny doběhnou nebo první úspěšný
+      const results = await Promise.all(selectorPromises);
+      
+      // Najdeme první úspěšný
+      const found = results.find(r => r.success);
+      
+      if (found) {
         buttonFound = true;
+        usedSelector = found.selector;
         console.log(`✅ Tlačítko nalezeno: ${usedSelector}`);
       }
     } catch (e) {
-      console.log('❌ Žádný selektor nenalezen pomocí Promise.race');
+      console.log('❌ Chyba při paralelním hledání:', e.message);
     }
 
     // Pokud nenajdeme pomocí selektorů, zkusíme text
@@ -135,7 +138,8 @@ app.post('/netflix-confirm', async (req, res) => {
             btn.textContent.toLowerCase().includes('potvrdit') || 
             btn.textContent.toLowerCase().includes('confirm') ||
             btn.textContent.toLowerCase().includes('aktualizovat') ||
-            btn.textContent.toLowerCase().includes('update')
+            btn.textContent.toLowerCase().includes('update') ||
+            btn.textContent.toLowerCase().includes('set as primary')
           );
         });
         
@@ -177,7 +181,8 @@ app.post('/netflix-confirm', async (req, res) => {
           btn.textContent.toLowerCase().includes('potvrdit') || 
           btn.textContent.toLowerCase().includes('confirm') ||
           btn.textContent.toLowerCase().includes('aktualizovat') ||
-          btn.textContent.toLowerCase().includes('update')
+          btn.textContent.toLowerCase().includes('update') ||
+          btn.textContent.toLowerCase().includes('set as primary')
         );
         if (confirmButton) confirmButton.click();
       });
