@@ -88,7 +88,9 @@ app.post('/netflix-confirm', async (req, res) => {
 
     // PARALELNÍ testování - všechny selektory najednou!
     const possibleSelectors = [
-      'button[type="submit"]', // Nejčastější - dát jako první
+      'button[type="button"]', // Nejčastější - dát jako první
+      'button[type="submit"]',
+      'button[data-uia="set-primary-location-action"]',
       'button[data-uia="confirmation-button"]',
       'button[data-uia="confirm-button"]',
       'button[data-uia="btn-continue"]',
