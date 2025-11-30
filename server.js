@@ -5,10 +5,8 @@ const chromium = require('@sparticuz/chromium');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Middleware pro parsování JSON
 app.use(express.json());
 
-// Health check endpoint
 app.get('/', (req, res) => {
   res.json({ 
     status: 'Server běží',
@@ -19,11 +17,9 @@ app.get('/', (req, res) => {
   });
 });
 
-// Hlavní endpoint pro potvrzení Netflix domácnosti
 app.post('/netflix-confirm', async (req, res) => {
-  const { url, fullScreenshots } = req.body;
+  const { url } = req.body;
 
-  // Validace URL
   if (!url) {
     return res.status(400).json({ 
       success: false, 
@@ -43,8 +39,7 @@ app.post('/netflix-confirm', async (req, res) => {
 
   let browser;
   try {
-    // Optimalizované argumenty pro rychlejší start
-    console.log('🚀 Spouštím Puppeteer (optimalizovaný)...');
+    console.log('🚀 Spouštím Puppeteer...');
     
     const args = [
       ...chromium.args,
@@ -55,68 +50,48 @@ app.post('/netflix-confirm', async (req, res) => {
       '--disable-gpu',
       '--no-first-run',
       '--no-zygote',
-      '--single-process', // Rychlejší start
-      '--disable-background-timer-throttling',
-      '--disable-backgrounding-occluded-windows',
-      '--disable-renderer-backgrounding'
+      '--single-process',
+      '--disable-background-timer-throttling'
     ];
     
     browser = await puppeteer.launch({
       args: args,
-      defaultViewport: { width: 1366, height: 768 }, // Menší = rychlejší
+      defaultViewport: { width: 1366, height: 768 },
       executablePath: await chromium.executablePath(),
-      headless: 'new', // Nový headless mode je rychlejší
+      headless: 'new',
     });
 
     const page = await browser.newPage();
     console.log(`⏱️ Browser start: ${Date.now() - startTime}ms`);
 
-    // Stealth konfigurace - maskování že je to bot
+    // Stealth konfigurace
     await page.evaluateOnNewDocument(() => {
-      Object.defineProperty(navigator, 'webdriver', {
-        get: () => false,
-      });
+      Object.defineProperty(navigator, 'webdriver', { get: () => false });
       window.chrome = { runtime: {} };
-      Object.defineProperty(navigator, 'plugins', {
-        get: () => [1, 2, 3, 4, 5]
-      });
-      Object.defineProperty(navigator, 'languages', {
-        get: () => ['cs-CZ', 'cs', 'en-US', 'en']
-      });
+      Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
+      Object.defineProperty(navigator, 'languages', { get: () => ['cs-CZ', 'cs', 'en-US', 'en'] });
     });
 
-    // User agent
     await page.setUserAgent(
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
       '(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
     );
-    
-    // Minimální headers
-    await page.setExtraHTTPHeaders({
-      'Accept-Language': 'cs-CZ,cs;q=0.9',
-      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
-    });
 
     console.log('🌐 Otevírám Netflix URL...');
-    
-    // RYCHLEJŠÍ načtení - čekáme jen na DOM, ne na všechny zdroje
     await page.goto(url, {
-      waitUntil: 'domcontentloaded', // Místo 'networkidle2'
+      waitUntil: 'domcontentloaded',
       timeout: 30000
     });
     console.log(`⏱️ Page load: ${Date.now() - startTime}ms`);
-    
-    // Kratší čekání - jen 500ms místo 2s
-    await new Promise(resolve => setTimeout(resolve, 500));
 
-    console.log('🔍 Hledám potvrzovací tlačítko...');
+    console.log('🔍 Hledám tlačítko (paralelně)...');
 
-    // Možné selektory
+    // PARALELNÍ testování - všechny selektory najednou!
     const possibleSelectors = [
+      'button[type="submit"]', // Nejčastější - dát jako první
       'button[data-uia="confirmation-button"]',
       'button[data-uia="confirm-button"]',
       'button[data-uia="btn-continue"]',
-      'button[type="submit"]',
       'button.btn-confirm',
       'a[data-uia="confirmation-link"]',
       '.primary-button',
@@ -127,25 +102,34 @@ app.post('/netflix-confirm', async (req, res) => {
     let buttonFound = false;
     let usedSelector = null;
 
-    // Zkrácené timeouty - 2s místo 5s
-    for (const selector of possibleSelectors) {
-      try {
-        await page.waitForSelector(selector, { timeout: 2000 });
+    try {
+      // Vytvoříme Promise pro každý selektor
+      const selectorPromises = possibleSelectors.map(selector => 
+        page.waitForSelector(selector, { timeout: 5000 })
+          .then(() => selector) // Vrátíme název selectoru pokud najde
+          .catch(() => null) // Null pokud nenajde
+      );
+
+      // Čekáme na PRVNÍ úspěšný (Promise.race)
+      usedSelector = await Promise.race(
+        selectorPromises.filter(p => p !== null)
+      );
+
+      if (usedSelector) {
         buttonFound = true;
-        usedSelector = selector;
-        console.log(`✅ Tlačítko nalezeno: ${selector}`);
-        break;
-      } catch (e) {
-        // Pokračuj dál
+        console.log(`✅ Tlačítko nalezeno: ${usedSelector}`);
       }
+    } catch (e) {
+      console.log('❌ Žádný selektor nenalezen pomocí Promise.race');
     }
 
+    // Pokud nenajdeme pomocí selektorů, zkusíme text
     if (!buttonFound) {
       console.log('🔍 Hledám podle textu...');
       try {
-        const textButton = await page.evaluateHandle(() => {
+        const hasButton = await page.evaluate(() => {
           const buttons = Array.from(document.querySelectorAll('button, a'));
-          return buttons.find(btn => 
+          return buttons.some(btn => 
             btn.textContent.toLowerCase().includes('potvrdit') || 
             btn.textContent.toLowerCase().includes('confirm') ||
             btn.textContent.toLowerCase().includes('aktualizovat') ||
@@ -153,9 +137,9 @@ app.post('/netflix-confirm', async (req, res) => {
           );
         });
         
-        if (textButton) {
+        if (hasButton) {
           buttonFound = true;
-          usedSelector = 'text-based-search';
+          usedSelector = 'text-based';
           console.log('✅ Tlačítko nalezeno podle textu');
         }
       } catch (e) {
@@ -163,11 +147,12 @@ app.post('/netflix-confirm', async (req, res) => {
       }
     }
 
+    console.log(`⏱️ Button search: ${Date.now() - startTime}ms`);
+
     if (!buttonFound) {
-      // Screenshot jen pro debug (viewport only = rychlejší)
       const debugScreenshot = await page.screenshot({ 
         encoding: 'base64',
-        fullPage: false // Rychlejší
+        fullPage: false
       });
       
       await browser.close();
@@ -175,26 +160,15 @@ app.post('/netflix-confirm', async (req, res) => {
       return res.status(500).json({
         success: false,
         error: 'Potvrzovací tlačítko nebylo nalezeno',
-        screenshot: `data:image/png;base64,${debugScreenshot}`
-      });
-    }
-
-    console.log(`⏱️ Button found: ${Date.now() - startTime}ms`);
-
-    // Screenshots - volitelné, jen pokud požadováno
-    let screenshotBefore = null;
-    if (fullScreenshots) {
-      console.log('📸 Screenshot před kliknutím...');
-      screenshotBefore = await page.screenshot({ 
-        encoding: 'base64',
-        fullPage: true 
+        screenshot: `data:image/png;base64,${debugScreenshot}`,
+        executionTimeMs: Date.now() - startTime
       });
     }
 
     // Kliknutí
     console.log('👆 Klikám...');
     
-    if (usedSelector === 'text-based-search') {
+    if (usedSelector === 'text-based') {
       await page.evaluate(() => {
         const buttons = Array.from(document.querySelectorAll('button, a'));
         const confirmButton = buttons.find(btn => 
@@ -211,26 +185,9 @@ app.post('/netflix-confirm', async (req, res) => {
 
     console.log(`⏱️ Click done: ${Date.now() - startTime}ms`);
 
-    // RYCHLEJŠÍ čekání - jen 1.5s místo 3s
+    // Minimální čekání
     console.log('⏳ Čekám na dokončení...');
-    try {
-      await Promise.race([
-        page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 2000 }),
-        new Promise(resolve => setTimeout(resolve, 1500))
-      ]);
-    } catch (e) {
-      // Timeout OK
-    }
-
-    // Screenshot po kliknutí - volitelný
-    let screenshotAfter = null;
-    if (fullScreenshots) {
-      console.log('📸 Screenshot po kliknutí...');
-      screenshotAfter = await page.screenshot({ 
-        encoding: 'base64',
-        fullPage: true 
-      });
-    }
+    await new Promise(resolve => setTimeout(resolve, 1000));
 
     const finalUrl = page.url();
     const wasRedirectedToLogin = finalUrl.includes('/login');
@@ -240,7 +197,7 @@ app.post('/netflix-confirm', async (req, res) => {
     const totalTime = Date.now() - startTime;
     console.log(`✅ Dokončeno za ${totalTime}ms (${(totalTime/1000).toFixed(1)}s)`);
 
-    const response = {
+    res.json({
       success: !wasRedirectedToLogin,
       message: wasRedirectedToLogin 
         ? '⚠️ Netflix vyžaduje přihlášení'
@@ -251,19 +208,10 @@ app.post('/netflix-confirm', async (req, res) => {
         buttonSelector: usedSelector,
         redirectedToLogin: wasRedirectedToLogin,
         executionTimeMs: totalTime,
+        executionTimeSec: (totalTime/1000).toFixed(1),
         timestamp: new Date().toISOString()
       }
-    };
-
-    // Přidat screenshots jen pokud byly pořízeny
-    if (fullScreenshots && (screenshotBefore || screenshotAfter)) {
-      response.screenshots = {
-        before: screenshotBefore ? `data:image/png;base64,${screenshotBefore}` : null,
-        after: screenshotAfter ? `data:image/png;base64,${screenshotAfter}` : null
-      };
-    }
-
-    res.json(response);
+    });
 
   } catch (error) {
     console.error('❌ Chyba:', error.message);
@@ -280,13 +228,11 @@ app.post('/netflix-confirm', async (req, res) => {
   }
 });
 
-// Spuštění serveru
 app.listen(PORT, () => {
   console.log(`🚀 Server běží na portu ${PORT}`);
   console.log(`📍 Local: http://localhost:${PORT}`);
 });
 
-// Graceful shutdown
 process.on('SIGTERM', () => {
   console.log('👋 Server se vypína...');
   process.exit(0);
